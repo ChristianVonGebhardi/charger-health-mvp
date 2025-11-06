@@ -1,0 +1,35 @@
+name: Fetch OCM Data
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run fetch script
+      env:
+        OCM_API_KEY: ${{ secrets.OCM_API_KEY }}
+      run: |
+        python src/fetch.py
+
+    - name: Upload database as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ev-db
+        path: data/ev.db
