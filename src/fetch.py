@@ -72,6 +72,17 @@ def safe_get(dct, *keys):
     return cur
 
 
+def get_last_status(c, station_id):
+    c.execute("""
+        SELECT status FROM status_history
+        WHERE station_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+    """, (station_id,))
+    row = c.fetchone()
+    return row[0] if row else None
+
+
 def save_to_db(data):
     """Speichert API-Daten in SQLite."""
     if not data:
@@ -121,17 +132,24 @@ def save_to_db(data):
                     num_points=excluded.num_points
             """, (station_id, title, operator, lat, lon, max_power, num_points))
 
-            # Dynamische Statusdaten (defensiv)
+            # Dynamische Statusdaten
             status = safe_get(d, "StatusType", "Title")
             is_operational = safe_get(d, "StatusType", "IsOperational")
 
-            # Zeitstempel als timezone-aware ISO string
-            timestamp = datetime.datetime.now(timezone.utc).isoformat()
+            # Letzten Status holen
+            last_status = get_last_status(c, station_id)
 
-            c.execute("""
+            # Prüfen, ob sich der Status geändert hat
+            if last_status != status:
+                timestamp = datetime.datetime.now(timezone.utc).isoformat()
+                c.execute("""
                 INSERT INTO status_history (station_id, status, is_operational, timestamp, raw_json)
                 VALUES (?, ?, ?, ?, ?)
-            """, (station_id, status, is_operational, timestamp, json.dumps(d)))
+                """, (station_id, status, is_operational, timestamp, json.dumps(d)))
+            else:
+                # Optional: Debug
+                # print(f"Keine Änderung bei {station_id}: {status}")
+                pass
 
         except Exception as e:
             # Fehler pro Eintrag loggen, aber Schleife fortsetzen
