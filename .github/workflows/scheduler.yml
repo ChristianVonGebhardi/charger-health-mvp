@@ -1,4 +1,4 @@
-name: Fetch OCM Data
+name: Fetch OCM Data (Release Persistence)
 
 on:
   schedule:
@@ -13,13 +13,6 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Restore previous database artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: ev-db
-        path: data
-      continue-on-error: true
-
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -28,16 +21,107 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
+        pip install requests
 
-    - name: Run fetch script (Change Detection)
+    #
+    # 1️⃣ Release "latest" herunterladen (falls vorhanden)
+    #
+    - name: Download latest DB from Release
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        echo "Downloading latest ev.db from Release..."
+        mkdir -p data
+
+        STATUS=$(curl -s -o data/ev.db -w "%{http_code}" \
+          -H "Authorization: token $GH_TOKEN" \
+          -L "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/latest/assets?name=ev.db")
+
+        if [ "$STATUS" != "200" ]; then
+          echo "No latest ev.db found. Starting fresh."
+        else
+          echo "latest ev.db restored."
+        fi
+
+    #
+    # 2️⃣ fetch.py ausführen ➝ Change Detection
+    #
+    - name: Run fetch script
       env:
         OCM_API_KEY: ${{ secrets.OCM_API_KEY }}
       run: |
         python src/fetch.py
 
-    - name: Upload updated database
-      uses: actions/upload-artifact@v4
-      with:
-        name: ev-db
-        path: data/ev.db
-        retention-days: 30
+    #
+    # 3️⃣ neue DB in Release "latest" hochladen
+    #
+    - name: Upload updated DB to latest release
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        echo "Uploading latest ev.db..."
+        
+        # Check if the release exists
+        RELEASE_ID=$(curl -s \
+          -H "Authorization: token $GH_TOKEN" \
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/latest \
+          | jq -r '.id')
+
+        if [ "$RELEASE_ID" = "null" ]; then
+          echo "Creating new release 'latest'..."
+          RELEASE_ID=$(curl -s -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -d '{"tag_name": "latest", "name": "latest"}' \
+            https://api.github.com/repos/${GITHUB_REPOSITORY}/releases \
+            | jq -r '.id')
+        fi
+
+        # Delete old asset if exists
+        ASSET_ID=$(curl -s \
+          -H "Authorization: token $GH_TOKEN" \
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID/assets \
+          | jq -r '.[] | select(.name=="ev.db") | .id')
+
+        if [ -n "$ASSET_ID" ]; then
+          curl -s -X DELETE \
+            -H "Authorization: token $GH_TOKEN" \
+            https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/$ASSET_ID
+        fi
+
+        # Upload new ev.db
+        curl -s -X POST \
+          -H "Authorization: token $GH_TOKEN" \
+          -H "Content-Type: application/octet-stream" \
+          --data-binary @data/ev.db \
+          "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID/assets?name=ev.db"
+
+    #
+    # 4️⃣ Snapshot-Release aktualisieren
+    #
+    - name: Upload snapshot version
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        echo "Uploading snapshot..."
+        SNAP_RELEASE_ID=$(curl -s \
+          -H "Authorization: token $GH_TOKEN" \
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/snapshots \
+          | jq -r '.id')
+
+        if [ "$SNAP_RELEASE_ID" = "null" ]; then
+          echo "Creating snapshots release..."
+          SNAP_RELEASE_ID=$(curl -s -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -d '{"tag_name": "snapshots", "name": "snapshots"}' \
+            https://api.github.com/repos/${GITHUB_REPOSITORY}/releases \
+            | jq -r '.id')
+        fi
+
+        TS=$(date +"%Y%m%d-%H%M")
+        SNAP_NAME="evdb-${TS}.db"
+
+        curl -s -X POST \
+          -H "Authorization: token $GH_TOKEN" \
+          -H "Content-Type: application/octet-stream" \
+          --data-binary @data/ev.db \
+          "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/$SNAP_RELEASE_ID/assets?name=$SNAP_NAME"
