@@ -136,6 +136,15 @@ def save_to_db(data):
             status = safe_get(d, "StatusType", "Title")
             is_operational = safe_get(d, "StatusType", "IsOperational")
 
+            # User Feedback 
+            user_feedback = None
+            comments = d.get("UserComments") or []
+            for comment in comments:
+                title = comment.get("CommentType", {}).get("Title", "")
+                if "Did You Successfully Charge?" in title:
+                    user_feedback = comment.get("Comment", None)
+                    break  # nur den ersten passenden Kommentar nehmen
+            
             # Letzten Status holen
             last_status = get_last_status(c, station_id)
 
@@ -143,9 +152,9 @@ def save_to_db(data):
             if last_status != status:
                 timestamp = datetime.datetime.now(timezone.utc).isoformat()
                 c.execute("""
-                INSERT INTO status_history (station_id, status, is_operational, timestamp, raw_json)
-                VALUES (?, ?, ?, ?, ?)
-                """, (station_id, status, is_operational, timestamp, json.dumps(d)))
+                INSERT INTO status_history (station_id, status, is_operational, timestamp, raw_json, user_feedback)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (station_id, status, is_operational, timestamp, json.dumps(d), user_feedback))
             else:
                 # Optional: Debug
                 # print(f"Keine Änderung bei {station_id}: {status}")
