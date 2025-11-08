@@ -33,14 +33,15 @@ jobs:
         echo "Downloading latest ev.db from Release..."
         mkdir -p data
 
-        # Asset-ID abrufen
-        ASSET_ID=$(curl -s \
-          -H "Authorization: token $GH_TOKEN" \
-          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/latest \
-          | jq -r '.assets[] | select(.name=="ev.db") | .id')
+        # Release-Info abrufen
+        RELEASE_JSON=$(curl -s -H "Authorization: token $GH_TOKEN" \
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/latest)
+
+        # Asset-ID extrahieren (robust gegen null)
+        ASSET_ID=$(echo "$RELEASE_JSON" | jq -r '.assets // [] | .[] | select(.name=="ev.db") | .id')
 
         if [ -n "$ASSET_ID" ]; then
-          # Echte Datei herunterladen
+          # Datei herunterladen
           curl -L -H "Authorization: token $GH_TOKEN" \
                -H "Accept: application/octet-stream" \
                https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/$ASSET_ID \
