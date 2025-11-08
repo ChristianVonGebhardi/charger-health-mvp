@@ -21,7 +21,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
-        pip install requests
+        pip install requests jq
 
     #
     # 1️⃣ Release "latest" herunterladen (falls vorhanden)
@@ -33,23 +33,44 @@ jobs:
         echo "Downloading latest ev.db from Release..."
         mkdir -p data
 
-        STATUS=$(curl -s -o data/ev.db -w "%{http_code}" \
+        # Asset-ID abrufen
+        ASSET_ID=$(curl -s \
           -H "Authorization: token $GH_TOKEN" \
-          -L "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/latest/assets?name=ev.db")
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/latest \
+          | jq -r '.assets[] | select(.name=="ev.db") | .id')
 
-        if [ "$STATUS" != "200" ]; then
-          echo "No latest ev.db found. Starting fresh."
-        else
+        if [ -n "$ASSET_ID" ]; then
+          # Echte Datei herunterladen
+          curl -L -H "Authorization: token $GH_TOKEN" \
+               -H "Accept: application/octet-stream" \
+               https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/$ASSET_ID \
+               -o data/ev.db
           echo "latest ev.db restored."
+        else
+          echo "No latest ev.db found. Starting fresh."
         fi
 
     #
-    # 2️⃣ fetch.py ausführen ➝ Change Detection
+    # 2️⃣ fetch.py ausführen ➝ Change Detection mit DB-Check
     #
     - name: Run fetch script
       env:
         OCM_API_KEY: ${{ secrets.OCM_API_KEY }}
       run: |
+        # Prüfen, ob die DB-Datei existiert
+        if [ -f data/ev.db ]; then
+          echo "Checking if ev.db is a valid SQLite database..."
+          if ! sqlite3 data/ev.db "PRAGMA schema_version;" >/dev/null 2>&1; then
+            echo "ERROR: data/ev.db is not a valid SQLite database!"
+            exit 1
+          else
+            echo "Database looks good."
+          fi
+        else
+          echo "No existing ev.db found. Will create a new one."
+        fi
+
+        # fetch.py ausführen
         python src/fetch.py
 
     #
@@ -61,7 +82,7 @@ jobs:
       run: |
         echo "Uploading latest ev.db..."
         
-        # Check if the release exists
+        # Release-ID abrufen oder Release erstellen
         RELEASE_ID=$(curl -s \
           -H "Authorization: token $GH_TOKEN" \
           https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/latest \
@@ -76,7 +97,7 @@ jobs:
             | jq -r '.id')
         fi
 
-        # Delete old asset if exists
+        # Alte Assets löschen, falls vorhanden
         ASSET_ID=$(curl -s \
           -H "Authorization: token $GH_TOKEN" \
           https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID/assets \
@@ -88,7 +109,7 @@ jobs:
             https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/$ASSET_ID
         fi
 
-        # Upload new ev.db
+        # Neue Datei hochladen
         curl -s -X POST \
           -H "Authorization: token $GH_TOKEN" \
           -H "Content-Type: application/octet-stream" \
