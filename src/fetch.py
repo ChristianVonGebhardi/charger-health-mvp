@@ -110,7 +110,6 @@ def save_to_db(data):
             if connections:
                 power_vals = []
                 for fconn in connections:
-                    # manche Einträge haben "PowerKW" oder "Level" oder None
                     pw = fconn.get("PowerKW") if isinstance(fconn, dict) else None
                     if pw:
                         power_vals.append(pw)
@@ -136,32 +135,85 @@ def save_to_db(data):
             status = safe_get(d, "StatusType", "Title")
             is_operational = safe_get(d, "StatusType", "IsOperational")
 
-            # User Feedback 
-            user_feedback = None
-            comments = d.get("UserComments") or []
-            for comment in comments:
-                title = comment.get("CommentType", {}).get("Title", "")
-                if "Did You Successfully Charge?" in title:
-                    user_feedback = comment.get("Comment", None)
-                    break  # nur den ersten passenden Kommentar nehmen
-            
-            # Letzten Status holen
-            last_status = get_last_status(c, station_id)
+            # === User Comments & Check-In Feedback aus OCM extrahieren ===
+            comment_type_title = None
+            checkin_status_title = None
+            comment_text = None
 
-            # Prüfen, ob sich der Status geändert hat
-            if last_status != status:
+            comments = d.get("UserComments") or []
+
+            for comment in comments:
+                # CommentType (z. B. "General Comment", "Problem Report")
+                ct = comment.get("CommentType", {})
+                if not comment_type_title and ct:
+                    comment_type_title = ct.get("Title")
+
+                # CheckinStatusType (z. B. "Successfully Charged", "Charging Not Possible")
+                cs = comment.get("CheckinStatusType", {})
+                if not checkin_status_title and cs:
+                    checkin_status_title = cs.get("Title")
+
+                # Freitext des Nutzers
+                if not comment_text:
+                    comment_text = comment.get("Comment")
+
+                # Wenn alle Felder gefunden → abbrechen
+                if comment_type_title and checkin_status_title and comment_text:
+                    break
+
+            # Debug-Ausgabe
+            if comment_type_title or checkin_status_title:
+                print(f"✅ Station {station_id} | Checkin='{checkin_status_title}' | Type='{comment_type_title}' | Text='{comment_text}'")
+
+            # Letzten Status laden
+            c.execute("""
+                SELECT status, comment_type_title, checkin_status_title, comment_text
+                FROM status_history
+                WHERE station_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+            """, (station_id,))
+            last_row = c.fetchone()
+
+            last_status = last_row[0] if last_row else None
+            last_comment_type = last_row[1] if last_row else None
+            last_checkin_status = last_row[2] if last_row else None
+            last_comment_text = last_row[3] if last_row else None
+
+            # Prüfen, ob eine neue Zeile notwendig ist
+            changed = (
+                last_status != status or
+                last_comment_type != comment_type_title or
+                last_checkin_status != checkin_status_title or
+                last_comment_text != comment_text
+            )
+
+            if changed:
                 timestamp = datetime.datetime.now(timezone.utc).isoformat()
                 c.execute("""
-                INSERT INTO status_history (station_id, status, is_operational, timestamp, raw_json, user_feedback)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, (station_id, status, is_operational, timestamp, json.dumps(d), user_feedback))
-            else:
-                # Optional: Debug
-                # print(f"Keine Änderung bei {station_id}: {status}")
-                pass
+                    INSERT INTO status_history (
+                        station_id,
+                        status,
+                        is_operational,
+                        timestamp,
+                        raw_json,
+                        comment_type_title,
+                        checkin_status_title,
+                        comment_text
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    station_id,
+                    status,
+                    is_operational,
+                    timestamp,
+                    json.dumps(d),
+                    comment_type_title,
+                    checkin_status_title,
+                    comment_text
+                ))
 
         except Exception as e:
-            # Fehler pro Eintrag loggen, aber Schleife fortsetzen
             print(f"⚠️ Fehler beim Verarbeiten station {d.get('ID')}: {e}")
 
     conn.commit()
