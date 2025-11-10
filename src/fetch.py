@@ -48,12 +48,81 @@ def init_db():
 
 
 def fetch_from_api(max_results=200):
-    """Ruft Daten von OpenChargeMap ab (API-Key im Query-String)."""
-    url = f"https://api.openchargemap.io/v3/poi/?output=json&countrycode=DE&maxresults={max_results}&key={API_KEY}"
+    """Ruft kommentierte Ladepunkte im Berliner Raum ab und zeigt Analyse über Kommentaraktivität."""
+
+    # Berlin Zentrum
+    latitude = 52.5200
+    longitude = 13.4050
+    radius_km = 20
+
+    url = (
+        "https://api.openchargemap.io/v3/poi/"
+        "?output=json"
+        "&countrycode=DE"
+        f"&latitude={latitude}"
+        f"&longitude={longitude}"
+        f"&distance={radius_km}"
+        "&distanceunit=KM"
+        "&mincomments=1"
+        f"&maxresults={max_results}"
+        f"&key={API_KEY}"
+    )
+
+    print(f"\n🌐 API URL:\n{url}\n")
+
     try:
         r = requests.get(url, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+
+        n = len(data)
+        print(f"✅ API Response OK — {n} Stationen mit mindestens einem Kommentar erhalten.\n")
+
+        # ------------------------
+        # COMMENT ANALYTICS
+        # ------------------------
+
+        comment_counts = []
+        station_summaries = []
+
+        for d in data:
+            sid = d.get("ID")
+            comments = d.get("UserComments") or []
+            cnt = len(comments)
+            comment_counts.append(cnt)
+            station_summaries.append((sid, cnt))
+
+        total_comments = sum(comment_counts)
+        max_comments = max(comment_counts) if comment_counts else 0
+        avg_comments = total_comments / n if n > 0 else 0
+
+        # Sortieren nach Anzahl Kommentare
+        station_summaries.sort(key=lambda x: x[1], reverse=True)
+
+        print("📊 Kommentar-Analyse:")
+        print(f"   ➤ Anzahl Stationen: {n}")
+        print(f"   ➤ Gesamtanzahl Kommentare: {total_comments}")
+        print(f"   ➤ Ø Kommentare pro Station: {avg_comments:.2f}")
+        print(f"   ➤ Max Kommentare an einer Station: {max_comments}")
+        print()
+
+        # Top 10 Stationen
+        print("🏆 Top kommentierte Stationen (Top 10):")
+        for sid, cnt in station_summaries[:10]:
+            print(f"   - Station {sid}: {cnt} Kommentare")
+
+        # Optionales Histogramm
+        print("\n📈 Histogramm der Kommentarhäufigkeit:")
+        hist = {}
+        for cnt in comment_counts:
+            hist[cnt] = hist.get(cnt, 0) + 1
+        for cnt in sorted(hist):
+            print(f"   {cnt} Kommentare: {hist[cnt]} Stationen")
+
+        print("\n")
+
+        return data
+
     except requests.RequestException as e:
         print("❌ API request failed:", e)
         return None
