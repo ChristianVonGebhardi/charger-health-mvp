@@ -135,6 +135,58 @@ def save_to_db(data):
             status = safe_get(d, "StatusType", "Title")
             is_operational = safe_get(d, "StatusType", "IsOperational")
 
+            # === Kommentare separat verarbeiten (NEUE Event-Tabelle) ===
+
+            comments = d.get("UserComments") or []
+
+            for comment in comments:
+                try:
+                    comment_ocm_id = comment.get("ID")  # OCM interne Kommentar-ID
+                    if comment_ocm_id is None:
+                        continue  # Kommentar kann nur mit ID gespeichert werden
+
+                    comment_type = safe_get(comment, "CommentType", "Title")
+                    checkin_status = safe_get(comment, "CheckinStatusType", "Title")
+                    comment_text = comment.get("Comment")
+                    comment_date = comment.get("DateCreated") or comment.get("DateLastModified")
+
+                    # Prüfe, ob dieser Kommentar schon existiert
+                    c.execute("""
+                        SELECT 1 FROM comments_history
+                        WHERE station_id = ? AND comment_ocm_id = ?
+                    """, (station_id, comment_ocm_id))
+
+                    exists = c.fetchone()
+
+                    if not exists:
+                        # Neuer Kommentar → speichern
+                        c.execute("""
+                            INSERT INTO comments_history (
+                                station_id,
+                                comment_ocm_id,
+                                comment_type,
+                                checkin_status,
+                                comment_text,
+                                comment_date,
+                                raw_json
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            station_id,
+                            comment_ocm_id,
+                            comment_type,
+                            checkin_status,
+                            comment_text,
+                            comment_date,
+                            json.dumps(comment)
+                        ))
+
+                        print(f"💬 Neuer Kommentar gespeichert: Station {station_id}, CommentID={comment_ocm_id}")
+
+                except Exception as e:
+                    print(f"⚠️ Fehler beim Verarbeiten eines Kommentars an Station {station_id}: {e}")
+
+            # Alter Code-Block: Noch behalten, bis MVP fertig ist
             # === User Comments & Check-In Feedback aus OCM extrahieren ===
             comment_type_title = None
             checkin_status_title = None
