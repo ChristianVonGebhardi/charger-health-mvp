@@ -20,6 +20,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
+    # --- Tabelle stations ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS stations (
             station_id INTEGER PRIMARY KEY,
@@ -32,14 +33,33 @@ def init_db():
         )
     """)
 
+    # --- Tabelle status_history ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS status_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             station_id INTEGER,
             status TEXT,
+            comment_type_title TEXT,
+            checkin_status_title TEXT,
+            comment_text TEXT,
             is_operational BOOLEAN,
             timestamp TEXT,
             raw_json TEXT
+        )
+    """)
+
+    # --- Neue Tabelle comments_history ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS comments_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            station_id INTEGER,
+            comment_ocm_id INTEGER,
+            comment_type TEXT,
+            checkin_status TEXT,
+            comment_text TEXT,
+            comment_date TEXT,
+            raw_json TEXT,
+            UNIQUE(station_id, comment_ocm_id)
         )
     """)
 
