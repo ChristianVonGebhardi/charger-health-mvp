@@ -13,6 +13,18 @@ DB_PATH = os.path.join(BASE_DIR, "..", "data", "ev.db")
 MAX_RESULTS = 500
 REQUEST_TIMEOUT = 15  # Sekunden
 
+UK_REGIONS = [
+    ("London", 51.5074, -0.1278),
+    ("Manchester", 53.4808, -2.2426),
+    ("Birmingham", 52.4862, -1.8904),
+    ("Leeds", 53.8008, -1.5491),
+    ("Bristol", 51.4545, -2.5879),
+    ("Brighton", 50.8225, -0.1372),
+    ("Oxford", 51.7520, -1.2577),
+    ("Cambridge", 52.2053, 0.1218),
+    ("Milton Keynes", 52.0406, -0.7594),
+    ("Reading", 51.4543, -0.9781),
+]
 
 def init_db():
     """Erstellt die SQLite-Datenbank und Tabellen falls nicht vorhanden."""
@@ -63,8 +75,100 @@ def init_db():
         )
     """)
 
+    # --- TEMP: Region Activity (Testphase) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS region_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            region_name TEXT,
+            country_code TEXT,
+            latitude REAL,
+            longitude REAL,
+            stations_count INTEGER,
+            stations_with_comments INTEGER,
+            total_comments INTEGER,
+            run_timestamp TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
+
+def scan_uk_regions(radius_km=15, max_results=300):
+    print("🇬🇧 Starte UK Region Scan (OCM)...\n")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    for name, lat, lon in UK_REGIONS:
+        print(f"🔍 Region: {name}")
+
+        url = (
+            "https://api.openchargemap.io/v3/poi/"
+            "?output=json"
+            "&countrycode=GB"
+            f"&latitude={lat}"
+            f"&longitude={lon}"
+            f"&distance={radius_km}"
+            "&distanceunit=KM"
+            f"&maxresults={max_results}"
+            f"&key={API_KEY}"
+        )
+
+        try:
+            r = requests.get(url, timeout=REQUEST_TIMEOUT)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            print(f"❌ Fehler bei {name}: {e}")
+            continue
+
+        stations_count = len(data)
+        stations_with_comments = 0
+        total_comments = 0
+
+        for d in data:
+            comments = d.get("UserComments") or []
+            if comments:
+                stations_with_comments += 1
+                total_comments += len(comments)
+
+        ts = datetime.datetime.now(timezone.utc).isoformat()
+
+        c.execute("""
+            INSERT INTO region_activity (
+                region_name,
+                country_code,
+                latitude,
+                longitude,
+                stations_count,
+                stations_with_comments,
+                total_comments,
+                run_timestamp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            name,
+            "GB",
+            lat,
+            lon,
+            stations_count,
+            stations_with_comments,
+            total_comments,
+            ts
+        ))
+
+        print(
+            f"   ➤ Stationen: {stations_count} | "
+            f"mit Kommentaren: {stations_with_comments} | "
+            f"Kommentare gesamt: {total_comments}"
+        )
+
+        time.sleep(2)  # API-freundlich
+
+    conn.commit()
+    conn.close()
+
+    print("\n✅ UK Region Scan abgeschlossen.\n")
 
 
 def fetch_from_api(max_results=200):
@@ -372,7 +476,12 @@ def run():
     save_to_db(data)
     print("✅ Fertig! Status-Historie aktualisiert.")
 
+def run_region_scan():
+    init_db()
+    scan_uk_regions()
+
 
 if __name__ == "__main__":
-    init_db()
-    run()
+    # init_db()
+    # run()
+    run_region_scan()
