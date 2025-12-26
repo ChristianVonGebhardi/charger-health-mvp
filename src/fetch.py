@@ -171,20 +171,25 @@ def scan_uk_regions(radius_km=15, max_results=300):
     print("\n✅ UK Region Scan abgeschlossen.\n")
 
 
-def fetch_from_api(max_results=200):
+def fetch_from_api(max_results=300):
     """Ruft kommentierte Ladepunkte im Berliner Raum ab und zeigt Analyse über Kommentaraktivität."""
 
     # Berlin Zentrum
-    latitude = 52.5200
-    longitude = 13.4050
-    radius_km = 20
+    #latitude = 52.5200
+    #longitude = 13.4050
+    #radius_km = 20
+
+    #London
+    Latitude = 51.5074
+    Longitude = -0.1278
+    radius_km = 15
 
     url = (
         "https://api.openchargemap.io/v3/poi/"
         "?output=json"
         "&countrycode=DE"
-        f"&latitude={latitude}"
-        f"&longitude={longitude}"
+        f"&latitude={Latitude}"
+        f"&longitude={Longitude}"
         f"&distance={radius_km}"
         "&distanceunit=KM"
         "&mincomments=1"
@@ -482,6 +487,6 @@ def run_region_scan():
 
 
 if __name__ == "__main__":
-    # init_db()
-    # run()
-    run_region_scan()
+    init_db()
+    run()
+    #run_region_scan()
