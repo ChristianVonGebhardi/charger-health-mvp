@@ -187,7 +187,7 @@ def fetch_from_api(max_results=300):
     url = (
         "https://api.openchargemap.io/v3/poi/"
         "?output=json"
-        "&countrycode=DE"
+        "&countrycode=GB"
         f"&latitude={Latitude}"
         f"&longitude={Longitude}"
         f"&distance={radius_km}"
